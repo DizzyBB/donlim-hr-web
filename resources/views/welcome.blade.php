@@ -286,7 +286,7 @@
           <div class="alert" role="status"></div>
         @endif
 
-        <form id="formTraining" action="{{ route('public.training.store') }}" method="POST" novalidate>
+        <form id="formTraining" action="{{ route('training.rooms.index') }}" method="POST" novalidate>
           @csrf
 
           <input name="nik" placeholder="NIK Pemohon" inputmode="numeric" autocomplete="off" required
