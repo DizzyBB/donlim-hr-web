@@ -6,4 +6,4 @@
     php_server {
         try_files {path} index.php
     }
-}
+} 
