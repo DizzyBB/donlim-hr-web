@@ -264,14 +264,13 @@
       <ul class="nav-links" id="navLinks">
         <li><a href="#request-training">Request Training</a></li>
         <li><a href="#pesan-ruang">Pesan Ruang</a></li>        
-        <li><a href="{{ route('login') }}" target="_blank" class="nav-cta">Login</a></li>
+        {{-- <li><a href="{{ route('login') }}" target="_blank" class="nav-cta">Login</a></li> --}}
       </ul>
     </nav>
   </header>
 
   <main class="page">
     <div class="grid">
-
       {{-- ============ FORM 1: Request Training ============ --}}
       <div class="card" id="request-training">
         <h2>Request Training</h2>
@@ -285,7 +284,7 @@
           <div class="alert" role="status"></div>
         @endif
 
-        <form id="formTraining" action="{{ route('training.rooms.index') }}" method="POST" novalidate>
+        <form id="formTraining" action="{{ route('public.training.store') }}" method="POST" novalidate>
           @csrf
 
           <input name="nik" placeholder="NIK Pemohon" inputmode="numeric" autocomplete="off" required
@@ -390,8 +389,8 @@
           <button type="submit" class="btn">Kirim</button>
         </form>
       </div>
-    </div>      
-  </main>
+    </div>    
+  </main>  
 
   <script>
     (() => {
