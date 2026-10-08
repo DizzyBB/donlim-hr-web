@@ -4,8 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token() }}">
-  <title>Training &amp; Ruang Training</title>
-  <link rel="stylesheet" href="{{ asset('css/training.css') }}">
+  <link rel="shortcut icon" href="{{ asset('assets/images/favicon.svg') }}" type="image/x-icon"/>
+  <title>Donlim HR WEB</title>
+  <link rel="stylesheet" href="">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap');
 
@@ -262,10 +263,8 @@
 
       <ul class="nav-links" id="navLinks">
         <li><a href="#request-training">Request Training</a></li>
-        <li><a href="#pesan-ruang">Pesan Ruang</a></li>
-        <li><a href="#riwayat">Riwayat</a></li>
-
-          <li><a href="{{ route('login') }}" target="_blank" class="nav-cta">Login</a></li>
+        <li><a href="#pesan-ruang">Pesan Ruang</a></li>        
+        <li><a href="{{ route('login') }}" target="_blank" class="nav-cta">Login</a></li>
       </ul>
     </nav>
   </header>
@@ -391,79 +390,7 @@
           <button type="submit" class="btn">Kirim</button>
         </form>
       </div>
-    </div>
-
-    {{-- ============ Riwayat ============ --}}
-    <div class="card" id="riwayat" style="margin-top:24px;">
-      <h2>Riwayat Pengajuan</h2>
-      <p class="sub">Masukkan NIK untuk melihat status pengajuan training / ruang kamu.</p>
-
-      <form action="{{ route('welcome') }}" method="GET" class="riwayat-search">
-        <input type="text" name="nik" placeholder="NIK" inputmode="numeric" autocomplete="off"
-               value="{{ $nikDicari ?? '' }}">
-        <button type="submit" class="btn">Cek Riwayat</button>
-      </form>
-
-      @if(($nikDicari ?? '') === '')
-        <table>
-          <thead>
-            <tr><th>Judul</th><th>Tipe</th><th>Ruangan</th><th>Waktu</th><th>Status</th></tr>
-          </thead>
-          <tbody>
-            <tr><td colspan="5">Masukkan NIK lalu klik "Cek Riwayat" untuk melihat pengajuanmu.</td></tr>
-          </tbody>
-        </table>
-      @elseif(! $karyawanDitemukan)
-        <table>
-          <thead>
-            <tr><th>Judul</th><th>Tipe</th><th>Ruangan</th><th>Waktu</th><th>Status</th></tr>
-          </thead>
-          <tbody>
-            <tr><td colspan="5">NIK "{{ $nikDicari }}" tidak ditemukan.</td></tr>
-          </tbody>
-        </table>
-      @else
-        <table>
-          <thead>
-            <tr><th>Judul</th><th>Tipe</th><th>Ruangan</th><th>Waktu</th><th>Status</th></tr>
-          </thead>
-          <tbody>
-            @forelse($riwayat as $r)
-              <tr>
-                <td>{{ $r->title }}</td>
-                <td>{{ $r->kind === 'room' ? 'Pesan Ruang' : ($r->type === 'external' ? 'Eksternal' : 'Internal') }}</td>
-                <td>{{ $r->room_display_name ?? '-' }}</td>
-                <td>
-                  {{ $r->start_time->format('d M Y H:i') }}
-                  <span class="muted">s/d {{ $r->end_time->format('d M Y H:i') }}</span>
-                </td>
-                <td><span class="badge {{ $r->status }}">{{ ucfirst($r->status) }}</span></td>
-              </tr>
-            @empty
-              <tr><td colspan="5">Belum ada pengajuan untuk NIK ini.</td></tr>
-            @endforelse
-          </tbody>
-        </table>
-
-        @if($riwayat->hasPages())
-          <div class="pager">
-            @if($riwayat->previousPageUrl())
-              <a href="{{ $riwayat->previousPageUrl() }}#riwayat" aria-label="Halaman sebelumnya">&lsaquo;</a>
-            @else
-              <button disabled aria-label="Halaman sebelumnya">&lsaquo;</button>
-            @endif
-
-            <span>Halaman {{ $riwayat->currentPage() }} dari {{ $riwayat->lastPage() }}</span>
-
-            @if($riwayat->nextPageUrl())
-              <a href="{{ $riwayat->nextPageUrl() }}#riwayat" aria-label="Halaman berikutnya">&rsaquo;</a>
-            @else
-              <button disabled aria-label="Halaman berikutnya">&rsaquo;</button>
-            @endif
-          </div>
-        @endif
-      @endif
-    </div>
+    </div>      
   </main>
 
   <script>

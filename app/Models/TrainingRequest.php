@@ -6,7 +6,6 @@ use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use App\Models\User;
 
 class TrainingRequest extends Model
 {
@@ -16,7 +15,7 @@ class TrainingRequest extends Model
 
     protected $fillable = [
         'karyawan_id', 'kind', 'type', 'title', 'description',
-        'reason', 'objective', 'room_id', 'start_time', 'end_time',
+        'reason', 'objective', 'room_id', 'room_name_custom', 'start_time', 'end_time',
         'status', 'admin_note', 'reviewed_by', 'reviewed_at',
     ];
 
@@ -36,6 +35,12 @@ class TrainingRequest extends Model
     public function room(): BelongsTo
     {
         return $this->belongsTo(Room::class);
+    }
+
+    /** Nama ruangan untuk ditampilkan, baik itu ruangan terdaftar maupun isian bebas "Lainnya". */
+    public function getRoomDisplayNameAttribute(): ?string
+    {
+        return $this->room?->name ?? $this->room_name_custom;
     }
 
     /** Admin (tabel users) yang menyetujui/menolak. */

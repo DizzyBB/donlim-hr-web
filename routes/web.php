@@ -13,10 +13,13 @@ use App\Http\Controllers\TrainingRequestController;
 use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\RoomController;
 use App\Http\Controllers\KaryawanTrainingController;
+use App\Http\Controllers\PublicTrainingController;
 
 
-Route::get('/', function () {
-    return view('welcome');
+Route::middleware('throttle:20,1')->group(function () {
+    Route::get('/', [PublicTrainingController::class, 'index'])->name('welcome');
+    Route::post('/training-requests', [PublicTrainingController::class, 'storeTraining'])->name('public.training.store');
+    Route::post('/room-bookings', [PublicTrainingController::class, 'storeRoom'])->name('public.room.store');
 });
 
 // AUTHENTICATION ROUTES
