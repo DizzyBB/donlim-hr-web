@@ -93,22 +93,26 @@
         {{-- Waktu Ujian --}}
         <div class="card mb-3">
             <div class="card-body">
-                <h6 class="fw-semibold mb-3">Masa Berlaku &amp; Durasi</h6>
+                <h6 class="fw-semibold mb-3">Status, Durasi &amp; Kelulusan</h6>
                 <div class="row g-3">
-                    <div class="col-sm-4">
-                        <label class="form-label" for="jamMulai">Jam Mulai</label>
-                        <input type="time" name="jam_mulai" id="jamMulai" class="form-control @error('jam_mulai') is-invalid @enderror"
-                               value="{{ old('jam_mulai', isset($ujian) ? substr($ujian->jam_mulai, 0, 5) : '') }}">
-                        @error('jam_mulai')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                    <div class="col-sm-3">
+                        <label class="form-label" for="statusUjian">Status</label>
+                        <select name="status" id="statusUjian" class="form-select @error('status') is-invalid @enderror">
+                            <option value="aktif" @selected(old('status', $ujian->status ?? 'aktif') === 'aktif')>Aktif</option>
+                            <option value="nonaktif" @selected(old('status', $ujian->status ?? 'aktif') === 'nonaktif')>Nonaktif</option>
+                        </select>
+                        @error('status')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                        <div class="form-text">Ujian aktif bisa diakses kapan saja selama peserta memiliki token.</div>
                     </div>
-                    <div class="col-sm-4">
-                        <label class="form-label" for="jamSelesai">Jam Selesai</label>
-                        <input type="time" name="jam_selesai" id="jamSelesai" class="form-control @error('jam_selesai') is-invalid @enderror"
-                               value="{{ old('jam_selesai', isset($ujian) ? substr($ujian->jam_selesai, 0, 5) : '') }}">
-                        @error('jam_selesai')<div class="invalid-feedback">{{ $message }}</div>@enderror
-                        <div class="invalid-feedback d-block d-none" id="errJamRange">Jam selesai harus lebih besar dari jam mulai.</div>
+                    <div class="col-sm-3">
+                        <label class="form-label" for="passingGrade">Passing Grade (%)</label>
+                        <input type="number" name="passing_grade" id="passingGrade" min="0" max="100" step="0.01"
+                               class="form-control @error('passing_grade') is-invalid @enderror"
+                               value="{{ old('passing_grade', isset($ujian) ? (float) $ujian->passing_grade : 70) }}">
+                        @error('passing_grade')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                        <div class="form-text">Lulus bila nilai akhir &ge; passing grade.</div>
                     </div>
-                    <div class="col-sm-4">
+                    <div class="col-sm-6">
                         <label class="form-label">Durasi Pengerjaan</label>
                         <div class="input-group">
                             <input type="number" min="0" id="durasiJam" class="form-control" placeholder="Jam" value="{{ intdiv((int) old('durasi_menit', $ujian->durasi_menit ?? 30), 60) }}">
@@ -158,8 +162,8 @@
                         <select id="soalTipeFilter" class="form-select">
                             <option value="">Semua Tipe Soal</option>
                             <option value="pg">Pilihan Ganda</option>
-                            <option value="bs">Jawaban Singkat</option>
-                            <option value="ur">Uraian</option>
+                            <option value="tf">Benar / Salah</option>
+                            <option value="ur">Esai</option>
                         </select>
                     </div>
                     <div class="col-md-2">
@@ -193,6 +197,43 @@
                 </nav>
 
                 <div id="soalIdsContainer"></div>
+            </div>
+        </div>
+
+        {{-- Bobot Soal --}}
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-1">
+                    <h6 class="fw-semibold mb-0">Bobot Soal Terpilih</h6>
+                    <div class="d-flex align-items-center gap-2">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="btnRatakan">Ratakan bobot</button>
+                        <span class="badge text-bg-secondary" id="totalBobotBadge">Total input: 0</span>
+                        <span class="badge text-bg-success" id="totalFinalBadge">Total akhir: 100</span>
+                    </div>
+                </div>
+                <p class="small text-muted">
+                    Isi bobot tiap soal (angka relatif, bobot awal = poin Bank Soal). Saat disimpan, bobot
+                    <strong>dinormalisasi otomatis sehingga total tepat 100</strong>, dan nilai peserta menjadi persentase (%).
+                    Kolom &ldquo;Bobot akhir&rdquo; menunjukkan hasil normalisasinya.
+                </p>
+                @error('bobot.*')<div class="alert alert-danger py-2">{{ $message }}</div>@enderror
+                <div class="table-responsive border rounded">
+                    <table class="table align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width:50px;">#</th>
+                                <th>Pertanyaan</th>
+                                <th style="width:130px;">Tipe</th>
+                                <th style="width:130px;">Bobot</th>
+                                <th style="width:110px;">Bobot akhir</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bobotTableBody">
+                            <tr><td colspan="5" class="text-center text-muted py-3">Belum ada soal dipilih.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="bobotErr" class="text-danger small mt-2 d-none">Bobot setiap soal harus berupa angka lebih besar dari 0.</div>
             </div>
         </div>
 
@@ -310,24 +351,6 @@ document.addEventListener('DOMContentLoaded', function(){
   updateDurasiTotal();
 
   /* =========================================================
-   |  Validasi jam mulai/selesai (client-side, pelengkap validasi server)
-   * =========================================================*/
-  const jamMulaiEl = document.getElementById('jamMulai');
-  const jamSelesaiEl = document.getElementById('jamSelesai');
-  const errJamRange = document.getElementById('errJamRange');
-
-  function cekRentangJam(){
-    if(jamMulaiEl.value && jamSelesaiEl.value && jamSelesaiEl.value <= jamMulaiEl.value){
-      errJamRange.classList.remove('d-none');
-      return false;
-    }
-    errJamRange.classList.add('d-none');
-    return true;
-  }
-  jamMulaiEl.addEventListener('change', cekRentangJam);
-  jamSelesaiEl.addEventListener('change', cekRentangJam);
-
-  /* =========================================================
    |  Bank Soal: tabel paginated + pilihan multi-halaman
    * =========================================================*/
   const SOAL_DATA_URL = @json(route('examination.ujian.soal-data'));
@@ -340,14 +363,106 @@ document.addEventListener('DOMContentLoaded', function(){
   const btnResetFilterSoal = document.getElementById('btnResetFilterSoal');
   const soalIdsContainer = document.getElementById('soalIdsContainer');
 
-  const LABEL_TIPE = { pg: 'Pilihan Ganda', bs: 'Jawaban Singkat', ur: 'Uraian' };
+  const LABEL_TIPE = { pg: 'Pilihan Ganda', tf: 'Benar / Salah', ur: 'Esai' };
 
   let currentPage = 1;
   let currentItemsOnPage = [];
   let soalDebounce = null;
   const selectedIds = new Set(@json(array_map('intval', old('soal_ids', isset($ujian) ? $ujian->soal->pluck('id')->all() : []))));
 
+  // Metadata soal terpilih (lintas halaman) dan bobot relatif yang diinput admin.
+  const metaMap = new Map();
+  const bobotMap = new Map();
+  @php
+      $bobotAwal = old('bobot', isset($ujian) ? $ujian->soal->mapWithKeys(fn ($x) => [$x->id => (float) $x->pivot->bobot])->all() : []);
+      $metaAwal = isset($ujian)
+          ? $ujian->soal->map(fn ($x) => ['id' => $x->id, 'pertanyaan' => $x->pertanyaan, 'tipe' => $x->tipe, 'poin' => $x->poin])->values()
+          : [];
+  @endphp
+  @json($metaAwal).forEach(function(m){ metaMap.set(m.id, m); });
+  const bobotAwal = @json((object) $bobotAwal);
+  Object.keys(bobotAwal).forEach(function(id){ bobotMap.set(parseInt(id, 10), String(bobotAwal[id])); });
+
+  const bobotTableBody = document.getElementById('bobotTableBody');
+  const totalBobotBadge = document.getElementById('totalBobotBadge');
+  const totalFinalBadge = document.getElementById('totalFinalBadge');
+  const bobotErr = document.getElementById('bobotErr');
+
+  // Sama dengan App\Support\Bobot::normalisasi di server: total akhir selalu 100.00
+  function normalisasi(ids){
+    const mentah = ids.map(function(id){ return parseFloat(bobotMap.get(id)); });
+    if(mentah.some(function(v){ return !(v > 0); })) return null;
+    const total = mentah.reduce(function(a, b){ return a + b; }, 0);
+    let akumulasi = 0;
+    return mentah.map(function(v, i){
+      const b = i === mentah.length - 1 ? Math.round((100 - akumulasi) * 100) / 100 : Math.round(v / total * 10000) / 100;
+      akumulasi += b;
+      return b;
+    });
+  }
+
+  function renderBobot(){
+    const ids = Array.from(selectedIds);
+    if(ids.length === 0){
+      bobotTableBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Belum ada soal dipilih.</td></tr>';
+      totalBobotBadge.textContent = 'Total input: 0';
+      totalFinalBadge.textContent = 'Total akhir: -';
+      return;
+    }
+    ids.forEach(function(id){
+      if(!bobotMap.has(id)){
+        const m = metaMap.get(id);
+        bobotMap.set(id, String(m ? Math.max(1, m.poin) : 1));
+      }
+    });
+    const hasil = normalisasi(ids);
+    let totalInput = 0;
+    ids.forEach(function(id){ totalInput += parseFloat(bobotMap.get(id)) || 0; });
+
+    bobotTableBody.innerHTML = ids.map(function(id, i){
+      const m = metaMap.get(id) || { pertanyaan: 'Soal #' + id, tipe: '' };
+      const salah = !(parseFloat(bobotMap.get(id)) > 0);
+      return '<tr>' +
+        '<td>' + (i + 1) + '</td>' +
+        '<td>' + escapeHtml(m.pertanyaan.length > 90 ? m.pertanyaan.substring(0, 90) + '…' : m.pertanyaan) + '</td>' +
+        '<td><span class="badge text-bg-light border">' + (LABEL_TIPE[m.tipe] || '-') + '</span></td>' +
+        '<td><input type="number" step="0.01" min="0.01" class="form-control form-control-sm bobot-input' + (salah ? ' is-invalid' : '') + '" data-id="' + id + '" value="' + escapeHtml(bobotMap.get(id)) + '"></td>' +
+        '<td class="fw-semibold bobot-akhir" data-id="' + id + '">' + (hasil ? hasil[i].toFixed(2) : '-') + '</td>' +
+        '</tr>';
+    }).join('');
+
+    totalBobotBadge.textContent = 'Total input: ' + (Math.round(totalInput * 100) / 100);
+    totalFinalBadge.textContent = 'Total akhir: ' + (hasil ? '100' : '-');
+    totalFinalBadge.className = 'badge ' + (hasil ? 'text-bg-success' : 'text-bg-danger');
+    bobotErr.classList.toggle('d-none', !!hasil);
+  }
+
+  // Perbarui angka tanpa merender ulang tabel (supaya fokus input tidak hilang saat mengetik).
+  bobotTableBody.addEventListener('input', function(e){
+    if(!e.target.classList.contains('bobot-input')) return;
+    bobotMap.set(parseInt(e.target.dataset.id, 10), e.target.value);
+    const ids = Array.from(selectedIds);
+    const hasil = normalisasi(ids);
+    let totalInput = 0;
+    ids.forEach(function(id){ totalInput += parseFloat(bobotMap.get(id)) || 0; });
+    e.target.classList.toggle('is-invalid', !(parseFloat(e.target.value) > 0));
+    ids.forEach(function(id, i){
+      const cell = bobotTableBody.querySelector('.bobot-akhir[data-id="' + id + '"]');
+      if(cell) cell.textContent = hasil ? hasil[i].toFixed(2) : '-';
+    });
+    totalBobotBadge.textContent = 'Total input: ' + (Math.round(totalInput * 100) / 100);
+    totalFinalBadge.textContent = 'Total akhir: ' + (hasil ? '100' : '-');
+    totalFinalBadge.className = 'badge ' + (hasil ? 'text-bg-success' : 'text-bg-danger');
+    bobotErr.classList.toggle('d-none', !!hasil);
+  });
+
+  document.getElementById('btnRatakan').addEventListener('click', function(){
+    selectedIds.forEach(function(id){ bobotMap.set(id, '1'); });
+    renderBobot();
+  });
+
   function updateSelectedCountBadge(){
+    renderBobot();
     selectedCountBadge.textContent = 'Soal dipilih: ' + selectedIds.size + ' soal';
   }
 
@@ -370,6 +485,8 @@ document.addEventListener('DOMContentLoaded', function(){
       .then(function(res){ return res.json(); })
       .then(function(res){
         currentItemsOnPage = res.data;
+        res.data.forEach(function(x){ metaMap.set(x.id, x); });
+        renderBobot();
         renderSoalTable(res.data);
         renderPagination(res.current_page, res.last_page);
         updateCheckAllState();
@@ -467,12 +584,6 @@ document.addEventListener('DOMContentLoaded', function(){
   document.getElementById('formUjian').addEventListener('submit', function(e){
     const jenis = document.querySelector('input[name="jenis"]:checked')?.value;
 
-    if(!cekRentangJam()){
-      e.preventDefault();
-      jamSelesaiEl.focus();
-      return;
-    }
-
     if(jenis === 'perorangan' && !karyawanIdEl.value){
       e.preventDefault();
       alert('Silakan pilih karyawan untuk Ujian Perorangan.');
@@ -486,8 +597,21 @@ document.addEventListener('DOMContentLoaded', function(){
       return;
     }
 
+    if(!normalisasi(Array.from(selectedIds))){
+      e.preventDefault();
+      bobotErr.classList.remove('d-none');
+      bobotErr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
     soalIdsContainer.innerHTML = '';
     selectedIds.forEach(function(id){
+      const b = document.createElement('input');
+      b.type = 'hidden';
+      b.name = 'bobot[' + id + ']';
+      b.value = bobotMap.get(id);
+      soalIdsContainer.appendChild(b);
+
       const input = document.createElement('input');
       input.type = 'hidden';
       input.name = 'soal_ids[]';

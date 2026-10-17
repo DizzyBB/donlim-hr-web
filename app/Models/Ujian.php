@@ -12,10 +12,12 @@ class Ujian extends Model
     protected $fillable = [
         'jenis',          // perorangan | karyawan_baru
         'nama_ujian',
+        'status',         // aktif | nonaktif (ujian bisa diakses kapan saja selama aktif)
         'karyawan_id',    // hanya diisi untuk jenis "perorangan"
-        'jam_mulai',
-        'jam_selesai',
+        'jam_mulai',      // tidak dipakai lagi (dipertahankan untuk data lama)
+        'jam_selesai',    // tidak dipakai lagi (dipertahankan untuk data lama)
         'durasi_menit',
+        'passing_grade',
         'acak_soal',
         'acak_jawaban',
     ];
@@ -24,6 +26,7 @@ class Ujian extends Model
         'acak_soal' => 'boolean',
         'acak_jawaban' => 'boolean',
         'durasi_menit' => 'integer',
+        'passing_grade' => 'decimal:2',
     ];
 
     public function karyawan()
@@ -35,12 +38,27 @@ class Ujian extends Model
 
     public function soal()
     {
-        return $this->belongsToMany(Soal::class, 'soal_ujian');
+        return $this->belongsToMany(Soal::class, 'soal_ujian')->withPivot('bobot');
     }
 
     public function hasilUjian()
     {
         return $this->hasMany(HasilUjian::class);
+    }
+
+    public function tokens()
+    {
+        return $this->hasMany(UjianToken::class);
+    }
+
+    public function scopeAktif($query)
+    {
+        return $query->where('status', 'aktif');
+    }
+
+    public function getIsAktifAttribute(): bool
+    {
+        return $this->status === 'aktif';
     }
 
     public function scopeJenis($query, ?string $jenis)

@@ -50,7 +50,7 @@
             <div>
                 <div class="eyebrow">Ujian sedang berlangsung</div>
                 <h1>{{ $hasilUjian->ujian->nama_ujian }}</h1>
-                <div class="small" style="color:#aab6c5;">{{ $hasilUjian->karyawan->nama }} &middot; {{ $hasilUjian->karyawan->nik }}</div>
+                <div class="small" style="color:#aab6c5;">{{ $hasilUjian->nama_peserta }} &middot; {{ $hasilUjian->nomor_peserta }}</div>
             </div>
             <div class="head-stats">
                 <div>
@@ -87,7 +87,7 @@
     </div>
 </div>
 
-<form id="formSelesai" method="POST" action="{{ route('karyawan.ujian.selesai', $hasilUjian) }}" class="d-none">
+<form id="formSelesai" method="POST" action="{{ $urlSelesai }}" class="d-none">
     @csrf
 </form>
 
@@ -115,7 +115,7 @@
 <script>
 (function(){
   const SOAL = @json($soal);
-  const URL_JAWAB = @json(route('karyawan.ujian.jawab', $hasilUjian));
+  const URL_JAWAB = @json($urlJawab);
   const CSRF = @json(csrf_token());
   const KEY_POSISI = 'posisi_ujian_' + @json($hasilUjian->id);
   // Batas waktu dihitung dari sisa detik versi server, lalu dijalankan pakai jam browser.
@@ -135,8 +135,11 @@
 
   function huruf(i){ return String.fromCharCode(65 + i); }
 
+  // PG dan Benar/Salah disimpan sebagai indeks pilihan; esai sebagai teks.
+  function adalahIndeks(s){ return s.tipe === 'pg' || s.tipe === 'tf'; }
+
   function terjawab(s){
-    if (s.tipe === 'pg') return s.jawabanIndex !== null && s.jawabanIndex !== undefined;
+    if (adalahIndeks(s)) return s.jawabanIndex !== null && s.jawabanIndex !== undefined;
     return (s.jawabanTeks || '').trim() !== '';
   }
 
@@ -152,8 +155,8 @@
       return s.promise.then(function(){ return s.dirty ? simpan(s) : undefined; });
     }
 
-    const nilai = s.tipe === 'pg' ? s.jawabanIndex : (s.jawabanTeks || '');
-    const body = s.tipe === 'pg'
+    const nilai = adalahIndeks(s) ? s.jawabanIndex : (s.jawabanTeks || '');
+    const body = adalahIndeks(s)
       ? { jawaban_id: s.id, jawaban_index: s.jawabanIndex }
       : { jawaban_id: s.id, jawaban_teks: s.jawabanTeks || '' };
 
@@ -172,7 +175,7 @@
           });
         }
         if (!res.ok) throw new Error('gagal');
-        const sekarang = s.tipe === 'pg' ? s.jawabanIndex : (s.jawabanTeks || '');
+        const sekarang = adalahIndeks(s) ? s.jawabanIndex : (s.jawabanTeks || '');
         if (sekarang === nilai) s.dirty = false;
         setStatus('Tersimpan');
       })
@@ -219,8 +222,12 @@
     hdrCounter.textContent = (indeks + 1) + ' / ' + SOAL.length;
     qAnswer.innerHTML = '';
 
-    if (s.tipe === 'pg') {
-      s.opsi.forEach(function(o, i){
+    if (adalahIndeks(s)) {
+      // Benar/Salah: indeks 1 = Benar, 0 = Salah
+      const daftarOpsi = s.tipe === 'tf'
+        ? [{ index: 1, teks: 'Benar' }, { index: 0, teks: 'Salah' }]
+        : s.opsi;
+      daftarOpsi.forEach(function(o, i){
         const label = document.createElement('label');
         label.className = 'opsi' + (s.jawabanIndex === o.index ? ' terpilih' : '');
 
@@ -238,7 +245,7 @@
 
         const h = document.createElement('span');
         h.className = 'huruf';
-        h.textContent = huruf(i) + '.';
+        h.textContent = s.tipe === 'tf' ? '' : huruf(i) + '.';
 
         const t = document.createElement('span');
         t.className = 'teks';
@@ -250,11 +257,10 @@
         qAnswer.appendChild(label);
       });
     } else {
-      const isUraian = s.tipe === 'ur';
-      const field = document.createElement(isUraian ? 'textarea' : 'input');
-      if (isUraian) { field.rows = 8; } else { field.type = 'text'; field.maxLength = 255; }
-      field.className = 'form-control' + (isUraian ? '' : ' form-control-lg');
-      field.placeholder = isUraian ? 'Tulis jawaban uraianmu di sini...' : 'Tulis jawaban singkatmu...';
+      const field = document.createElement('textarea');
+      field.rows = 8;
+      field.className = 'form-control';
+      field.placeholder = 'Tulis jawaban esaimu di sini...';
       field.value = s.jawabanTeks || '';
 
       field.addEventListener('input', function(){

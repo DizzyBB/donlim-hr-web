@@ -62,7 +62,7 @@ class ExamController extends Controller
         $tipe = $request->input('tipe');
 
         $rules = [
-            'tipe' => ['required', Rule::in(['pg', 'bs', 'ur'])],
+            'tipe' => ['required', Rule::in(['pg', 'tf', 'ur'])],
             'pertanyaan' => ['required', 'string'],
             'kategori' => ['nullable', 'string', 'max:255'],
             'poin' => ['nullable', 'integer', 'min:1'],
@@ -72,8 +72,8 @@ class ExamController extends Controller
             $rules['opsi'] = ['required', 'array', 'min:2'];
             $rules['opsi.*'] = ['required', 'string'];
             $rules['jawabanIndex'] = ['required', 'integer', 'min:0'];
-        } elseif ($tipe === 'bs') {
-            $rules['jawabanBS'] = ['required', Rule::in(['benar', 'salah'])];
+        } elseif ($tipe === 'tf') {
+            $rules['jawabanTF'] = ['required', Rule::in(['benar', 'salah'])];
         } elseif ($tipe === 'ur') {
             $rules['kunci'] = ['nullable', 'string'];
         }
@@ -87,7 +87,7 @@ class ExamController extends Controller
             'poin' => $validated['poin'] ?? 10,
             'opsi' => $validated['opsi'] ?? null,
             'jawaban_index' => $validated['jawabanIndex'] ?? null,
-            'jawaban_bs' => $validated['jawabanBS'] ?? null,
+            'jawaban_tf' => isset($validated['jawabanTF']) ? $validated['jawabanTF'] === 'benar' : null,
             'kunci' => $validated['kunci'] ?? null,
         ];
     }
@@ -121,6 +121,11 @@ class ExamController extends Controller
     {
         abort_unless(in_array($type, ['excel', 'word']), 404);
 
+        // Template Excel dibuat langsung supaya selalu sesuai tipe soal terbaru (PG, Benar/Salah, Esai).
+        if ($type === 'excel') {
+            return $this->templateExcel();
+        }
+
         $path = $type === 'excel'
             ? storage_path('app/templates/template-bank-soal.xlsx')
             : storage_path('app/templates/template-bank-soal.docx');
@@ -128,6 +133,25 @@ class ExamController extends Controller
         abort_unless(file_exists($path), 404, 'Template belum tersedia di server.');
 
         return response()->download($path);
+    }
+
+    protected function templateExcel()
+    {
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Template Soal');
+        $sheet->fromArray([
+            ['No', 'Tipe Soal', 'Pertanyaan', 'Pilihan A', 'Pilihan B', 'Pilihan C', 'Pilihan D', 'Pilihan E', 'Jawaban Benar', 'Kategori', 'Poin'],
+            [1, 'Pilihan Ganda', 'Ibu kota Indonesia adalah ...', 'Bandung', 'Jakarta', 'Surabaya', 'Medan', '', 'B', 'Umum', 10],
+            [2, 'Benar / Salah', 'Matahari terbit dari barat.', '', '', '', '', '', 'Salah', 'Umum', 10],
+            [3, 'Esai', 'Jelaskan alur pengajuan cuti di perusahaan.', '', '', '', '', '', 'Kunci / rubrik penilaian (opsional)', 'HR', 20],
+        ], null, 'A1');
+        $sheet->getStyle('A1:K1')->getFont()->setBold(true);
+        $sheet->getColumnDimension('C')->setWidth(50);
+
+        return response()->streamDownload(function () use ($spreadsheet) {
+            (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet))->save('php://output');
+        }, 'template-bank-soal.xlsx');
     }
 
     public function import(Request $request)
@@ -158,8 +182,9 @@ class ExamController extends Controller
 
             $tipe = match (true) {
                 str_contains($tipeRaw, 'pilihan ganda') => 'pg',
-                str_contains($tipeRaw, 'benar') => 'bs',
-                str_contains($tipeRaw, 'uraian') => 'ur',
+                str_contains($tipeRaw, 'benar'), str_contains($tipeRaw, 'salah') => 'tf',
+                str_contains($tipeRaw, 'esai'), str_contains($tipeRaw, 'essay'),
+                str_contains($tipeRaw, 'uraian'), str_contains($tipeRaw, 'jawaban singkat') => 'ur',
                 default => null,
             };
 
@@ -196,15 +221,15 @@ class ExamController extends Controller
 
                 $data['opsi'] = $opsi;
                 $data['jawaban_index'] = $index;
-            } elseif ($tipe === 'bs') {
+            } elseif ($tipe === 'tf') {
                 $nilai = Str::lower(trim($row['jawaban_benar'] ?? ''));
                 if (! in_array($nilai, ['benar', 'salah'])) {
                     $errors[] = "Baris {$baris}: Jawaban Benar harus \"Benar\" atau \"Salah\".";
                     $skipped++;
                     continue;
                 }
-                $data['jawaban_bs'] = $nilai;
-            } else { // uraian
+                $data['jawaban_tf'] = $nilai === 'benar';
+            } else { // esai
                 $data['kunci'] = trim($row['jawaban_benar'] ?? '') ?: null;
             }
 

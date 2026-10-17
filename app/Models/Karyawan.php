@@ -16,7 +16,9 @@ class Karyawan extends Authenticatable
         'email',
         'jabatan',
         'departemen',
+        'join_date',
         'password',
+        'must_change_password',
         'role',
     ];
 
@@ -27,11 +29,18 @@ class Karyawan extends Authenticatable
 
     protected $casts = [
         'password' => 'hashed',
+        'join_date' => 'date',
+        'must_change_password' => 'boolean',
     ];
 
     public function ujian()
     {
         return $this->hasMany(Ujian::class);
+    }
+
+    public function hasilUjian()
+    {
+        return $this->hasMany(HasilUjian::class);
     }
 
     public function trainingRequests()

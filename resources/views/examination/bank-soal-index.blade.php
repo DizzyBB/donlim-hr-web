@@ -34,8 +34,8 @@
                     <select name="tipe" class="form-select">
                         <option value="">Semua Tipe Soal</option>
                         <option value="pg" @selected(request('tipe') == 'pg')>Pilihan Ganda</option>
-                        <option value="bs" @selected(request('tipe') == 'bs')>Jawaban Singkat</option>
-                        <option value="ur" @selected(request('tipe') == 'ur')>Uraian</option>
+                        <option value="tf" @selected(request('tipe') == 'tf')>Benar / Salah</option>
+                        <option value="ur" @selected(request('tipe') == 'ur')>Esai</option>
                     </select>
                 </div>
                 <div class="col-md-2">
@@ -77,11 +77,11 @@
                                         @case('pg')
                                             <span class="badge bg-primary-subtle text-primary">Pilihan Ganda</span>
                                             @break
-                                        @case('bs')
-                                            <span class="badge bg-warning-subtle text-warning">Jawaban Singkat</span>
+                                        @case('tf')
+                                            <span class="badge bg-warning-subtle text-warning">Benar / Salah</span>
                                             @break
                                         @case('ur')
-                                            <span class="badge bg-info-subtle text-info">Uraian</span>
+                                            <span class="badge bg-info-subtle text-info">Esai</span>
                                             @break
                                     @endswitch
                                 </td>

@@ -263,7 +263,8 @@
 
       <ul class="nav-links" id="navLinks">
         <li><a href="#request-training">Request Training</a></li>
-        <li><a href="#pesan-ruang">Pesan Ruang</a></li>        
+        <li><a href="#pesan-ruang">Pesan Ruang</a></li>
+        <li><a href="{{ route('peserta.token') }}">Ujian Karyawan Baru</a></li>
         {{-- <li><a href="{{ route('login') }}" target="_blank" class="nav-cta">Login</a></li> --}}
       </ul>
     </nav>

@@ -2,166 +2,189 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Controllers\Controller;
 use App\Models\HasilUjian;
-use App\Models\JawabanPeserta;
+use App\Services\DuplikatService;
+use App\Services\PenilaianService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
+/**
+ * Penilaian & koreksi oleh admin / HRD.
+ *  - Esai dinilai manual (0 .. bobot soal). Selama masih ada esai belum dinilai, status ujian = Pending.
+ *  - HRD dapat mengoreksi skor semua soal, passing grade hasil, atau menghitung ulang otomatis bila kunci jawaban berubah.
+ *    Setiap koreksi pada hasil final / skor otomatis wajib disertai catatan dan tercatat (siapa & kapan).
+ */
 class PenilaianController extends Controller
 {
-    /**
-     * Poin mentah maksimal per tipe soal (bukan dari kolom "poin" di Bank Soal lagi).
-     * PG dinilai otomatis (benar/salah), Jawaban Singkat & Uraian dinilai manual
-     * dengan skor 0..maks di bawah ini.
-     */
-    protected const POIN_MENTAH = [
-        'pg' => 5,
-        'bs' => 10,
-        'ur' => 20,
-    ];
+    public function __construct(
+        protected PenilaianService $penilaian,
+        protected DuplikatService $duplikat,
+    ) {
+    }
 
-    /**
-     * Daftar hasil ujian yang perlu dinilai (default) atau sudah dinilai.
-     */
+    /** Daftar hasil ujian yang perlu dinilai (default: Pending) atau sudah dinilai. */
     public function index(Request $request)
     {
         $status = $request->input('status', 'belum_dinilai');
 
-        $hasilUjian = HasilUjian::with(['ujian', 'karyawan'])
+        $hasilUjian = HasilUjian::with(['ujian', 'karyawan', 'pesertaBaru'])
             ->status($status)
             ->when($request->filled('search'), function ($q) use ($request) {
-                $s = $request->input('search');
+                $s = '%' . $request->input('search') . '%';
                 $q->where(function ($qq) use ($s) {
-                    $qq->whereHas('ujian', fn ($u) => $u->where('nama_ujian', 'like', "%{$s}%"))
-                       ->orWhereHas('karyawan', fn ($k) => $k->where('nama', 'like', "%{$s}%"));
+                    $qq->whereHas('ujian', fn ($u) => $u->where('nama_ujian', 'like', $s))
+                        ->orWhereHas('karyawan', fn ($k) => $k->where('nama', 'like', $s)->orWhere('nik', 'like', $s))
+                        ->orWhereHas('pesertaBaru', fn ($p) => $p->where('nama', 'like', $s));
                 });
             })
             ->latest('waktu_selesai')
             ->paginate(10)
             ->withQueryString();
 
-        return view('examination.penilaian-index', compact('hasilUjian', 'status'));
+        $duplikat = $this->duplikat->petakan($hasilUjian->getCollection());
+
+        return view('examination.penilaian-index', compact('hasilUjian', 'status', 'duplikat'));
     }
 
-    /**
-     * Form penilaian: PG ditampilkan otomatis (benar/salah + skor),
-     * Uraian & Jawaban Singkat diisi skor manual oleh penilai.
-     */
     public function show(HasilUjian $hasilUjian)
     {
-        $hasilUjian->load(['ujian', 'karyawan', 'jawaban.soal']);
+        $hasilUjian->load(['ujian', 'karyawan', 'pesertaBaru', 'jawaban.soal', 'pengoreksi', 'penilai']);
 
-        // Pastikan skor PG selalu ter-update sesuai kunci jawaban soal saat ini.
-        $this->hitungUlangSkorPG($hasilUjian);
-        $hasilUjian->refresh()->load('jawaban.soal');
+        $infoDuplikat = $hasilUjian->pesertaBaru
+            ? $this->duplikat->untukPesertaBaru($hasilUjian->pesertaBaru)
+            : null;
 
-        // Preview nilai skala 100 (belum disimpan) supaya kartu ringkasan akurat
-        // walau penilaian manual belum di-submit.
-        [$nilaiPG, $nilaiManual, $nilaiTotal] = $this->hitungNilaiSkalaSeratus($hasilUjian);
-        $hasilUjian->nilai_pilihan_ganda = $nilaiPG;
-        $hasilUjian->nilai_manual = $nilaiManual;
-        $hasilUjian->nilai_total = $nilaiTotal;
-
-        $jawabanPG = $hasilUjian->jawaban->where('tipe', 'pg');
-        $jawabanManual = $hasilUjian->jawaban->whereIn('tipe', ['bs', 'ur']);
-
-        return view('examination.penilaian-show', compact('hasilUjian', 'jawabanPG', 'jawabanManual'));
+        return view('examination.penilaian-show', [
+            'hasilUjian' => $hasilUjian,
+            'jawabanOtomatis' => $hasilUjian->jawaban->whereIn('tipe', PenilaianService::TIPE_OTOMATIS),
+            'jawabanEsai' => $hasilUjian->jawaban->whereIn('tipe', PenilaianService::TIPE_MANUAL),
+            'infoDuplikat' => $infoDuplikat,
+        ]);
     }
 
     /**
-     * Simpan skor manual untuk tiap jawaban uraian/jawaban singkat,
-     * lalu hitung ulang nilai_pilihan_ganda + nilai_manual + nilai_total.
+     * Simpan skor (esai wajib; PG/Benar-Salah opsional sebagai koreksi), passing grade hasil, dan catatan koreksi.
      */
     public function update(Request $request, HasilUjian $hasilUjian)
     {
-        $hasilUjian->load(['jawaban.soal']);
+        abort_if($hasilUjian->status === 'berlangsung', 404);
 
-        $jawabanManual = $hasilUjian->jawaban->whereIn('tipe', ['bs', 'ur']);
+        $hasilUjian->load(['ujian', 'jawaban.soal']);
 
-        $rules = [];
-        foreach ($jawabanManual as $j) {
-            $maxSkor = self::POIN_MENTAH[$j->tipe] ?? 10;
-            $rules["skor.{$j->id}"] = ['required', 'numeric', 'min:0', "max:{$maxSkor}"];
-            $rules["catatan.{$j->id}"] = ['nullable', 'string'];
+        $rules = [
+            'passing_grade' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'catatan_koreksi' => ['nullable', 'string', 'max:2000'],
+        ];
+
+        foreach ($hasilUjian->jawaban as $j) {
+            $maks = (float) $j->bobot;
+            $esaiBerisi = $j->tipe === 'ur' && filled($j->jawaban_teks);
+
+            $rules["skor.{$j->id}"] = [$esaiBerisi ? 'required' : 'nullable', 'numeric', 'min:0', "max:{$maks}"];
+            $rules["catatan.{$j->id}"] = ['nullable', 'string', 'max:2000'];
         }
 
-        $validated = $request->validate($rules);
+        $validated = $request->validate($rules, [
+            'skor.*.required' => 'Skor esai wajib diisi.',
+            'skor.*.max' => 'Skor tidak boleh melebihi bobot soal.',
+            'skor.*.numeric' => 'Skor harus berupa angka.',
+            'skor.*.min' => 'Skor tidak boleh negatif.',
+        ]);
 
-        DB::transaction(function () use ($hasilUjian, $jawabanManual, $validated) {
-            foreach ($jawabanManual as $j) {
-                $j->update([
-                    'skor' => $validated['skor'][$j->id] ?? 0,
-                    'catatan_penilai' => $validated['catatan'][$j->id] ?? null,
-                ]);
+        // Apakah ini sebuah KOREKSI (bukan sekadar penilaian esai pertama kali)?
+        $skorBaru = $validated['skor'] ?? [];
+        $ubahOtomatis = false;
+        foreach ($hasilUjian->jawaban as $j) {
+            if (in_array($j->tipe, PenilaianService::TIPE_OTOMATIS, true)
+                && array_key_exists($j->id, $skorBaru)
+                && $skorBaru[$j->id] !== null
+                && abs((float) $skorBaru[$j->id] - (float) $j->skor) > 0.001) {
+                $ubahOtomatis = true;
+            }
+        }
+
+        $passingBaru = isset($validated['passing_grade']) && $validated['passing_grade'] !== ''
+            ? (float) $validated['passing_grade']
+            : null;
+        $ubahPassing = $passingBaru !== null
+            && $hasilUjian->passing_grade !== null
+            && abs($passingBaru - (float) $hasilUjian->passing_grade) > 0.001;
+
+        $koreksi = $ubahOtomatis || $ubahPassing || $hasilUjian->status === 'selesai_dinilai';
+
+        if ($koreksi && blank($validated['catatan_koreksi'] ?? null)) {
+            throw ValidationException::withMessages([
+                'catatan_koreksi' => 'Catatan koreksi wajib diisi saat mengubah hasil yang sudah dinilai, skor otomatis, atau passing grade.',
+            ]);
+        }
+
+        DB::transaction(function () use ($hasilUjian, $validated, $skorBaru, $passingBaru, $koreksi) {
+            foreach ($hasilUjian->jawaban as $j) {
+                $perubahan = [];
+
+                if (array_key_exists($j->id, $skorBaru) && $skorBaru[$j->id] !== null) {
+                    $perubahan['skor'] = $skorBaru[$j->id];
+                } elseif ($j->tipe === 'ur' && blank($j->jawaban_teks) && $j->skor === null) {
+                    $perubahan['skor'] = 0;
+                }
+
+                if (array_key_exists($j->id, $validated['catatan'] ?? [])) {
+                    $perubahan['catatan_penilai'] = $validated['catatan'][$j->id];
+                }
+
+                if ($perubahan !== []) {
+                    $j->update($perubahan);
+                }
             }
 
-            $this->hitungUlangSkorPG($hasilUjian);
-
-            [$nilaiPG, $nilaiManual, $nilaiTotal] = $this->hitungNilaiSkalaSeratus($hasilUjian->fresh(['jawaban.soal']));
+            $hasilUjian->refresh();
+            $this->penilaian->tetapkanStatus($hasilUjian, $passingBaru);
 
             $hasilUjian->update([
-                'nilai_pilihan_ganda' => $nilaiPG,
-                'nilai_manual' => $nilaiManual,
-                'nilai_total' => $nilaiTotal,
-                'status' => 'selesai_dinilai',
-                'dinilai_pada' => now(),
-                'dinilai_oleh' => auth('web')->id(),
+                'dinilai_oleh' => $hasilUjian->dinilai_oleh ?? auth('web')->id(),
+                'dinilai_pada' => $hasilUjian->dinilai_pada ?? now(),
             ]);
+
+            if ($koreksi) {
+                $hasilUjian->update([
+                    'dikoreksi_oleh' => auth('web')->id(),
+                    'dikoreksi_pada' => now(),
+                    'catatan_koreksi' => $validated['catatan_koreksi'],
+                ]);
+            }
         });
 
+        $hasilUjian->refresh();
+
         return redirect()
-            ->route('examination.penilaian.index')
-            ->with('success', "Penilaian untuk \"{$hasilUjian->karyawan->nama}\" berhasil disimpan. Nilai total: {$hasilUjian->nilai_total}");
+            ->route('examination.penilaian.show', $hasilUjian)
+            ->with('success', "Penilaian untuk \"{$hasilUjian->nama_peserta}\" disimpan. Nilai: {$hasilUjian->nilai_total}% - {$hasilUjian->kelulusan_label}.");
     }
 
     /**
-     * Hitung ulang benar/salah + skor mentah untuk semua jawaban pilihan ganda
-     * berdasarkan kunci jawaban (jawaban_index) yang tersimpan di soal.
-     * Skor mentah PG selalu 5 (POIN_MENTAH['pg']) kalau benar, 0 kalau salah.
+     * Hitung ulang skor PG & Benar/Salah terhadap kunci jawaban saat ini (mis. setelah kunci soal diperbaiki).
+     * Skor esai yang sudah dinilai tidak diubah.
      */
-    protected function hitungUlangSkorPG(HasilUjian $hasilUjian): void
+    public function hitungUlang(HasilUjian $hasilUjian)
     {
-        $jawabanPG = $hasilUjian->jawaban->where('tipe', 'pg');
-        $poinPG = self::POIN_MENTAH['pg'];
+        abort_if($hasilUjian->status === 'berlangsung', 404);
 
-        foreach ($jawabanPG as $j) {
-            if (! $j->soal) {
-                continue;
+        $hasilUjian->load(['ujian', 'jawaban.soal']);
+
+        DB::transaction(function () use ($hasilUjian) {
+            $this->penilaian->evaluasiOtomatis($hasilUjian);
+            $this->penilaian->tetapkanStatus($hasilUjian->refresh());
+
+            if ($hasilUjian->status === 'selesai_dinilai') {
+                $hasilUjian->update([
+                    'dikoreksi_oleh' => auth('web')->id(),
+                    'dikoreksi_pada' => now(),
+                    'catatan_koreksi' => 'Hitung ulang otomatis berdasarkan kunci jawaban terbaru.',
+                ]);
             }
-            $benar = $j->jawaban_index !== null && $j->jawaban_index === $j->soal->jawaban_index;
-            $j->update([
-                'benar' => $benar,
-                'skor' => $benar ? $poinPG : 0,
-            ]);
-        }
-    }
+        });
 
-    /**
-     * Skala nilai ke 0-100: total skor mentah yang didapat dibagi total skor
-     * mentah maksimal yang mungkin (5 x jumlah PG + 10 x jumlah Jawaban Singkat
-     * + 20 x jumlah Uraian), lalu dikali 100. Kalau semua soal benar/dapat
-     * skor penuh, hasilnya otomatis 100 — berapa pun jumlah & komposisi soalnya.
-     *
-     * @return array{0: float, 1: float, 2: float} [nilaiPG, nilaiManual, nilaiTotal]
-     */
-    protected function hitungNilaiSkalaSeratus(HasilUjian $hasilUjian): array
-    {
-        $jawaban = $hasilUjian->jawaban;
-
-        $maksimalMentah = $jawaban->sum(fn ($j) => self::POIN_MENTAH[$j->tipe] ?? 0);
-
-        if ($maksimalMentah <= 0) {
-            return [0, 0, 0];
-        }
-
-        $mentahPG = $jawaban->where('tipe', 'pg')->sum('skor');
-        $mentahManual = $jawaban->whereIn('tipe', ['bs', 'ur'])->sum('skor');
-
-        $nilaiPG = round(($mentahPG / $maksimalMentah) * 100, 2);
-        $nilaiManual = round(($mentahManual / $maksimalMentah) * 100, 2);
-
-        return [$nilaiPG, $nilaiManual, $nilaiPG + $nilaiManual];
+        return back()->with('success', 'Skor otomatis dihitung ulang berdasarkan kunci jawaban terbaru.');
     }
 }

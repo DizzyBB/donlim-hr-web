@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Departemen;
 use App\Models\HasilUjian;
 use App\Models\Karyawan;
 use Illuminate\Http\Request;
@@ -11,8 +12,15 @@ class KaryawanController extends Controller
 {
     public function index(Request $request)
     {
+        // Satu kotak pencarian: cocok ke Nomor Karyawan (NIK) ATAU nama.
+        $cari = trim((string) $request->input('search', ''));
+
         $karyawan = Karyawan::query()
-            ->when($request->filled('search'), fn ($q) => $q->where('nama', 'like', '%' . $request->input('search') . '%'))
+            ->when($cari !== '', fn ($q) => $q->where(function ($qq) use ($cari) {
+                $like = '%' . addcslashes($cari, '%_\\') . '%';
+                $qq->where('nik', 'like', $like)->orWhere('nama', 'like', $like);
+            }))
+            ->orderByRaw('CASE WHEN nik = ? THEN 0 ELSE 1 END', [$cari]) // NIK persis tampil paling atas
             ->latest()
             ->paginate(10)
             ->withQueryString();
@@ -22,13 +30,14 @@ class KaryawanController extends Controller
 
     public function create()
     {
-        return view('karyawan.edit');
+        return view('karyawan.edit', ['daftarDepartemen' => Departemen::orderBy('nama')->pluck('nama')]);
     }
 
     public function store(Request $request)
     {
         $validated = $this->validateKaryawan($request);
         Karyawan::create($validated);
+        $this->pastikanDepartemenAda($validated['departemen'] ?? null);
 
         return redirect()
             ->route('karyawan.index')
@@ -37,7 +46,10 @@ class KaryawanController extends Controller
 
     public function edit(Karyawan $karyawan)
     {
-        return view('karyawan.edit', compact('karyawan'));
+        return view('karyawan.edit', [
+            'karyawan' => $karyawan,
+            'daftarDepartemen' => Departemen::orderBy('nama')->pluck('nama'),
+        ]);
     }
 
     public function update(Request $request, Karyawan $karyawan)
@@ -45,6 +57,7 @@ class KaryawanController extends Controller
         $validated = $this->validateKaryawan($request, $karyawan);
 
         $karyawan->update($validated);
+        $this->pastikanDepartemenAda($validated['departemen'] ?? null);
 
         return redirect()
             ->route('karyawan.index')
@@ -67,6 +80,15 @@ class KaryawanController extends Controller
             ->with('success', "Data karyawan {$nama} berhasil dihapus.");
     }
 
+    /** Departemen yang diketik manual otomatis masuk ke master supaya muncul di dropdown. */
+    private function pastikanDepartemenAda(?string $nama): void
+    {
+        $nama = trim((string) $nama);
+        if ($nama !== '') {
+            Departemen::firstOrCreate(['nama' => $nama]);
+        }
+    }
+
     private function validateKaryawan(Request $request, ?Karyawan $karyawan = null): array
     {
         $rules = [
@@ -75,6 +97,7 @@ class KaryawanController extends Controller
             'email' => ['nullable', 'email', 'max:255', Rule::unique('karyawans', 'email')->ignore($karyawan?->id)],
             'jabatan' => ['nullable', 'string', 'max:255'],
             'departemen' => ['nullable', 'string', 'max:255'],
+            'join_date' => ['nullable', 'date', 'before_or_equal:today'],
             'role' => ['required', Rule::in(['administrator', 'karyawan'])],
         ];
 

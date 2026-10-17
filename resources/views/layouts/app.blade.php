@@ -54,6 +54,12 @@
               <span class="text">Data Karyawan</span>
             </a>
           </li>
+          <li class="nav-item">
+            <a href="{{ route('departemen.index') }}" class="{{ request()->routeIs('departemen.*') ? 'active' : '' }}">
+              <span class="icon"><i class="lni lni-network"></i></span>
+              <span class="text">Master Departemen</span>
+            </a>
+          </li>
           <li class="nav-item nav-item-has-children {{ request()->routeIs('examination.*') ? 'menu-open' : '' }}">
             <a
               href="#0"

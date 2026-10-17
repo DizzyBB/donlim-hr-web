@@ -51,9 +51,22 @@
                     </div>
                     <div class="col-md-6">
                         <label for="departemen" class="form-label">Departemen</label>
-                        <input id="departemen" name="departemen" type="text" value="{{ old('departemen', $karyawan->departemen ?? '') }}"
+                        <input id="departemen" name="departemen" type="text" list="daftarDepartemen" autocomplete="off"
+                            value="{{ old('departemen', $karyawan->departemen ?? '') }}"
                             class="form-control @error('departemen') is-invalid @enderror">
+                        <datalist id="daftarDepartemen">
+                            @foreach($daftarDepartemen ?? [] as $d)
+                                <option value="{{ $d }}"></option>
+                            @endforeach
+                        </datalist>
                         @error('departemen')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                    </div>
+                    <div class="col-md-6">
+                        <label for="join_date" class="form-label">Tanggal Masuk</label>
+                        <input id="join_date" name="join_date" type="date" max="{{ now()->toDateString() }}"
+                            value="{{ old('join_date', isset($karyawan) ? $karyawan->join_date?->format('Y-m-d') : '') }}"
+                            class="form-control @error('join_date') is-invalid @enderror">
+                        @error('join_date')<div class="invalid-feedback">{{ $message }}</div>@enderror
                     </div>
                     <div class="col-md-6">
                         <label for="role" class="form-label">Role</label>

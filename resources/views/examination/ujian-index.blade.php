@@ -60,11 +60,12 @@
                             <th>Nama Ujian</th>
                             <th style="width:150px;">Jenis</th>
                             <th style="width:180px;">Karyawan</th>
-                            <th style="width:130px;">Waktu</th>
+                            <th style="width:110px;">Status</th>
                             <th style="width:110px;">Durasi</th>
+                            <th style="width:110px;">Passing Grade</th>
                             <th style="width:90px;">Soal</th>
                             <th style="width:140px;">Pengacakan</th>
-                            <th style="width:110px;" class="text-center">Aksi</th>
+                            <th style="width:170px;" class="text-center">Aksi</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -79,14 +80,30 @@
                                     @endif
                                 </td>
                                 <td>{{ $item->karyawan->nama ?? '-' }}</td>
-                                <td>{{ substr($item->jam_mulai, 0, 5) }} - {{ substr($item->jam_selesai, 0, 5) }}</td>
+                                <td>
+                                    <form action="{{ route('examination.ujian.status', $item) }}" method="POST" class="d-inline">
+                                        @csrf
+                                        <button type="submit" class="badge border-0 {{ $item->is_aktif ? 'bg-success' : 'bg-secondary' }}"
+                                                title="Klik untuk {{ $item->is_aktif ? 'menonaktifkan' : 'mengaktifkan' }}">
+                                            {{ $item->is_aktif ? 'Aktif' : 'Nonaktif' }}
+                                        </button>
+                                    </form>
+                                    <div class="small text-muted">Bisa diakses kapan saja</div>
+                                </td>
                                 <td>{{ $item->durasi_label }}</td>
+                                <td>{{ rtrim(rtrim(number_format($item->passing_grade, 2), '0'), '.') }}%</td>
                                 <td>{{ $item->soal_count }} soal</td>
                                 <td>
                                     @if($item->acak_soal)<span class="badge bg-light text-dark border">Acak Soal</span>@endif
                                     @if($item->acak_jawaban)<span class="badge bg-light text-dark border">Acak Jawaban</span>@endif
                                 </td>
                                 <td class="text-center">
+                                    <a href="{{ route('examination.ujian.token.index', $item) }}" class="btn btn-sm btn-outline-primary p-2 position-relative" title="Kelola token">
+                                        <i class="lni lni-key"></i>
+                                        @if($item->token_aktif_count > 0)
+                                            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-success">{{ $item->token_aktif_count }}</span>
+                                        @endif
+                                    </a>
                                     <a href="{{ route('examination.ujian.edit', $item) }}" class="btn btn-sm btn-outline-secondary p-2" title="Edit">
                                          <i class="lni lni-pencil-alt"></i>
                                     </a>
@@ -102,7 +119,7 @@
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="8" class="text-center text-muted py-4">Belum ada ujian dibuat.</td>
+                                <td colspan="9" class="text-center text-muted py-4">Belum ada ujian dibuat.</td>
                             </tr>
                         @endforelse
                     </tbody>

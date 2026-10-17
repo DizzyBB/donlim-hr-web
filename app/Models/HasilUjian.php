@@ -13,10 +13,16 @@ class HasilUjian extends Model
     protected $fillable = [
         'ujian_id',
         'karyawan_id',
+        'peserta_baru_id',
         'status',
         'nilai_pilihan_ganda',
         'nilai_manual',
         'nilai_total',
+        'passing_grade',
+        'lulus',
+        'dikoreksi_oleh',
+        'dikoreksi_pada',
+        'catatan_koreksi',
         'waktu_mulai',
         'waktu_selesai',
         'dinilai_pada',
@@ -30,6 +36,9 @@ class HasilUjian extends Model
         'nilai_pilihan_ganda' => 'decimal:2',
         'nilai_manual' => 'decimal:2',
         'nilai_total' => 'decimal:2',
+        'passing_grade' => 'decimal:2',
+        'lulus' => 'boolean',
+        'dikoreksi_pada' => 'datetime',
     ];
 
     public function ujian()
@@ -42,9 +51,64 @@ class HasilUjian extends Model
         return $this->belongsTo(Karyawan::class);
     }
 
+    public function pesertaBaru()
+    {
+        return $this->belongsTo(PesertaBaru::class, 'peserta_baru_id');
+    }
+
     public function penilai()
     {
-        return $this->belongsTo(Karyawan::class, 'dinilai_oleh');
+        return $this->belongsTo(User::class, 'dinilai_oleh');
+    }
+
+    public function pengoreksi()
+    {
+        return $this->belongsTo(User::class, 'dikoreksi_oleh');
+    }
+
+    public function tokens()
+    {
+        return $this->hasMany(UjianToken::class);
+    }
+
+    /** Nama peserta: karyawan aktif atau peserta karyawan baru. */
+    public function getNamaPesertaAttribute(): string
+    {
+        return $this->karyawan?->nama ?? $this->pesertaBaru?->nama ?? '-';
+    }
+
+    public function getDepartemenPesertaAttribute(): ?string
+    {
+        return $this->karyawan?->departemen ?? $this->pesertaBaru?->departemen_nama;
+    }
+
+    public function getNomorPesertaAttribute(): string
+    {
+        return $this->karyawan?->nik ?? 'Karyawan Baru';
+    }
+
+    public function getIsPesertaBaruAttribute(): bool
+    {
+        return $this->peserta_baru_id !== null;
+    }
+
+    /** Label status untuk tampilan: belum_dinilai ditampilkan sebagai "Pending". */
+    public function getStatusLabelAttribute(): string
+    {
+        return [
+            'berlangsung' => 'Berlangsung',
+            'belum_dinilai' => 'Pending',
+            'selesai_dinilai' => 'Selesai',
+        ][$this->status] ?? $this->status;
+    }
+
+    public function getKelulusanLabelAttribute(): string
+    {
+        if ($this->status !== 'selesai_dinilai' || $this->lulus === null) {
+            return $this->status === 'berlangsung' ? 'Sedang dikerjakan' : 'Pending';
+        }
+
+        return $this->lulus ? 'Lulus' : 'Tidak Lulus';
     }
 
     public function jawaban()
@@ -53,16 +117,12 @@ class HasilUjian extends Model
     }
 
     /**
-     * Batas akhir pengerjaan = yang lebih awal antara
-     * (waktu mulai + durasi pengerjaan) dan jam selesai masa berlaku ujian di hari itu.
+     * Batas akhir pengerjaan = waktu mulai + durasi ujian.
+     * Ujian bisa diakses kapan saja selama aktif, jadi tidak ada lagi batas jam harian.
      */
     public function batasWaktu(): CarbonInterface
     {
-        $mulai = $this->waktu_mulai;
-        $batasDurasi = $mulai->copy()->addMinutes($this->ujian->durasi_menit);
-        $batasJendela = $mulai->copy()->setTimeFromTimeString($this->ujian->jam_selesai);
-
-        return $batasDurasi->min($batasJendela);
+        return $this->waktu_mulai->copy()->addMinutes($this->ujian->durasi_menit);
     }
 
     /**
@@ -79,7 +139,7 @@ class HasilUjian extends Model
     }
 
     /**
-     * Butuh penilaian manual kalau ada jawaban tipe bs/ur yang skornya masih null.
+     * Butuh penilaian manual (esai) selama status masih Pending.
      */
     public function getPerluDinilaiAttribute(): bool
     {

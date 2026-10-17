@@ -10,14 +10,22 @@
         <p class="text-muted mb-0">Berikut ujian yang tersedia untukmu saat ini.</p>
     </div>
 
-    @foreach(['success' => 'success', 'error' => 'danger', 'info' => 'info'] as $kunci => $warna)
-        @if(session($kunci))
-            <div class="alert alert-{{ $warna }} alert-dismissible fade show" role="alert">
-                {{ session($kunci) }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    @include('partials.flash')
+
+    {{-- Masuk ujian lanjutan dengan token (terikat akun ini) --}}
+    <div class="panel p-3 p-md-4 mb-4">
+        <h6 class="fw-semibold mb-1"><i class="bi bi-key me-1"></i> Masuk Ujian dengan Token</h6>
+        <p class="small text-muted mb-3">Masukkan token dari HRD. Token hanya berlaku untuk akunmu dan hanya bisa dipakai satu kali.</p>
+        <form method="POST" action="{{ route('karyawan.ujian.token') }}" class="row g-2">
+            @csrf
+            <div class="col-sm-6 col-md-4">
+                <input type="text" name="token" value="{{ old('token') }}" maxlength="16" autocomplete="off" placeholder="XXXX-XXXX"
+                       class="form-control text-uppercase @error('token') is-invalid @enderror" style="letter-spacing:.2em;font-weight:700;" required>
+                @error('token')<div class="invalid-feedback">{{ $message }}</div>@enderror
             </div>
-        @endif
-    @endforeach
+            <div class="col-auto"><button type="submit" class="btn btn-navy">Mulai</button></div>
+        </form>
+    </div>
 
     {{-- Ujian yang sedang dikerjakan --}}
     @foreach($sedangBerlangsung as $h)
@@ -46,18 +54,11 @@
                     </div>
                     <h5 class="mb-3">{{ $ujian->nama_ujian }}</h5>
                     <ul class="list-unstyled small text-muted mb-3">
-                        <li><i class="bi bi-clock me-2"></i>Berlaku {{ substr($ujian->jam_mulai, 0, 5) }} - {{ substr($ujian->jam_selesai, 0, 5) }}</li>
+                        <li><i class="bi bi-clock me-2"></i>Bisa diakses kapan saja (dengan token)</li>
                         <li><i class="bi bi-hourglass me-2"></i>Durasi pengerjaan {{ $ujian->durasi_label }}</li>
                         <li><i class="bi bi-list-check me-2"></i>{{ $ujian->soal_count }} soal</li>
                     </ul>
-                    <p class="small text-muted">Waktu pengerjaan mulai dihitung saat kamu menekan tombol Mulai. Ujian hanya bisa dikerjakan satu kali.</p>
-                    <form action="{{ route('karyawan.ujian.mulai', $ujian) }}" method="POST" class="mt-auto"
-                          onsubmit="return confirm('Mulai ujian &quot;{{ $ujian->nama_ujian }}&quot; sekarang? Waktu langsung berjalan.')">
-                        @csrf
-                        <button type="submit" class="btn btn-navy w-100">
-                            <i class="bi bi-play-fill me-1"></i> Mulai Ujian
-                        </button>
-                    </form>
+                    <p class="small text-muted mb-0">Minta token ke HRD, lalu masukkan di kotak token di atas. Waktu mulai dihitung setelah token dipakai; ujian hanya bisa dikerjakan satu kali.</p>
                 </div>
             </div>
         @empty
@@ -90,9 +91,9 @@
                             <td>{{ $r->waktu_selesai?->format('d M Y H:i') ?? '-' }}</td>
                             <td>
                                 @if($r->status === 'selesai_dinilai')
-                                    <span class="badge bg-success-subtle text-success">Nilai: {{ $r->nilai_total }}</span>
+                                    <span class="badge {{ $r->lulus ? 'bg-success' : 'bg-danger' }}">{{ $r->nilai_total }}% &middot; {{ $r->kelulusan_label }}</span>
                                 @else
-                                    <span class="badge bg-warning-subtle text-warning">Menunggu penilaian</span>
+                                    <span class="badge bg-warning text-dark">Pending</span>
                                 @endif
                             </td>
                             <td class="text-end">
@@ -109,9 +110,3 @@
 </div>
 @endsection
 
-@push('scripts')
-<script>
-    // Muat ulang tiap 60 detik supaya ujian yang masa berlakunya baru mulai / sudah berakhir ikut ter-update.
-    setTimeout(function(){ window.location.reload(); }, 60000);
-</script>
-@endpush

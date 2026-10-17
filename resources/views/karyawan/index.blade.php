@@ -15,6 +15,7 @@
 				<span class="employee-total__number">{{ number_format($karyawan->total()) }}</span>
 				<span class="employee-total__label">Total karyawan</span>
 			</div>
+			<a href="{{ route('karyawan.import') }}" class="btn btn-outline-primary text-nowrap">Import Excel/CSV</a>
 			<a href="{{ route('karyawan.create') }}" class="btn btn-primary text-nowrap">Tambah Karyawan</a>
 		</div>
 	</div>
@@ -36,14 +37,14 @@
 		<div class="card-body p-3 p-lg-4">
 			<form action="{{ route('karyawan.index') }}" method="GET" class="row g-2 align-items-center mb-4">
 				<div class="col-12 col-md-7 col-lg-5">
-					<label for="employee-search" class="visually-hidden">Cari nama karyawan</label>
+					<label for="employee-search" class="visually-hidden">Cari Nomor Karyawan (NIK) atau nama</label>
 					<input
 						id="employee-search"
 						type="search"
 						name="search"
 						value="{{ request('search') }}"
 						class="form-control"
-						placeholder="Cari nama karyawan..."
+						placeholder="Cari Nomor Karyawan (NIK) atau nama..."
 					>
 				</div>
 				<div class="col-6 col-md-auto">
@@ -69,6 +70,7 @@
 							<th scope="col">NIK</th>
 							<th scope="col">Jabatan</th>
 							<th scope="col">Departemen</th>
+							<th scope="col">Tgl Masuk</th>
 							<th scope="col">Role</th>
 							<th scope="col" class="text-end">Aksi</th>
 						</tr>
@@ -88,6 +90,7 @@
 								<td class="text-nowrap">{{ $item->nik }}</td>
 								<td>{{ $item->jabatan ?: '-' }}</td>
 								<td>{{ $item->departemen ?: '-' }}</td>
+								<td class="text-nowrap">{{ $item->join_date?->format('d M Y') ?? '-' }}</td>
 								<td>
 									@if($item->role === 'administrator')
 										<span class="badge employee-role employee-role--admin">Administrator</span>
@@ -107,9 +110,9 @@
 							</tr>
 						@empty
 							<tr>
-								<td colspan="6" class="text-center py-5">
+								<td colspan="7" class="text-center py-5">
 									<div class="fw-semibold mb-1">Data karyawan tidak ditemukan</div>
-									<div class="small text-muted">Coba gunakan kata kunci nama yang berbeda.</div>
+									<div class="small text-muted">Coba gunakan Nomor Karyawan (NIK) atau nama yang berbeda.</div>
 								</td>
 							</tr>
 						@endforelse

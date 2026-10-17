@@ -25,13 +25,13 @@
     <div class="d-flex justify-content-between align-items-center flex-wrap mb-3">
         <div>
             <h4 class="mb-1">Input Soal</h4>
-            <p class="text-muted mb-0">Tambahkan soal pilihan ganda, jawaban singkat, atau uraian.</p>
+            <p class="text-muted mb-0">Tambahkan soal Pilihan Ganda, Benar / Salah, atau Esai.</p>
         </div>
         <div class="d-flex gap-2">
             <span class="badge text-bg-light border">Total: <b id="statTotal">0</b></span>
             <span class="badge text-bg-primary-subtle text-primary-emphasis border">PG: <b id="statPG">0</b></span>
-            <span class="badge text-bg-warning-subtle text-warning-emphasis border">B/S: <b id="statBS">0</b></span>
-            <span class="badge text-bg-info-subtle text-info-emphasis border">Uraian: <b id="statUR">0</b></span>
+            <span class="badge text-bg-warning-subtle text-warning-emphasis border">Benar/Salah: <b id="statTF">0</b></span>
+            <span class="badge text-bg-info-subtle text-info-emphasis border">Esai: <b id="statUR">0</b></span>
         </div>
     </div>
 
@@ -43,11 +43,11 @@
                 <button type="button" class="btn btn-outline-primary tipe-btn active" data-tipe="pg">
                     Pilihan Ganda
                 </button>
-                <button type="button" class="btn btn-outline-primary tipe-btn" data-tipe="bs">
-                    Jawaban Singkat
+                <button type="button" class="btn btn-outline-primary tipe-btn" data-tipe="tf">
+                    Benar / Salah
                 </button>
                 <button type="button" class="btn btn-outline-primary tipe-btn" data-tipe="ur">
-                    Uraian
+                    Esai
                 </button>
             </div>
 
@@ -73,7 +73,7 @@
                         <input type="text" class="form-control" id="kategori" placeholder="Contoh: Sejarah">
                     </div>
                     <div class="col-sm-6">
-                        <label class="form-label" for="poin">Poin</label>
+                        <label class="form-label" for="poin">Poin <span class="text-muted fw-normal">(bobot awal; dinormalisasi ke 100 saat dipakai di ujian)</span></label>
                         <input type="number" class="form-control" id="poin" value="10" min="1">
                     </div>
                 </div>
@@ -88,17 +88,24 @@
                     </button>
                 </div>
 
-                {{-- Blok Jawaban Singkat --}}
-                <div id="blokBS" class="mb-2 d-none">
-                    <label class="form-label" for="jawabanSingkat">Jawaban Benar</label>
-                    <input type="text" class="form-control" id="jawabanSingkat" placeholder="Tulis jawaban yang benar...">
-                    <div class="invalid-feedback d-block d-none" id="errBS">Jawaban benar tidak boleh kosong.</div>
+                {{-- Blok Benar / Salah --}}
+                <div id="blokTF" class="mb-2 d-none">
+                    <label class="form-label d-block">Kunci Jawaban</label>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="jawabanTF" id="tfBenar" value="benar">
+                        <label class="form-check-label" for="tfBenar">Benar</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="jawabanTF" id="tfSalah" value="salah">
+                        <label class="form-check-label" for="tfSalah">Salah</label>
+                    </div>
+                    <div class="invalid-feedback d-block d-none" id="errTF">Pilih kunci jawaban: Benar atau Salah.</div>
                 </div>
 
                 {{-- Blok Uraian --}}
                 <div id="blokUR" class="mb-2 d-none">
                     <label class="form-label" for="kunciUraian">
-                        Kunci Jawaban / Rubrik Penilaian <span class="text-muted fw-normal">(opsional)</span>
+                        Kunci Jawaban / Rubrik Penilaian Esai <span class="text-muted fw-normal">(opsional)</span>
                     </label>
                     <textarea class="form-control" id="kunciUraian" rows="3"
                               placeholder="Poin-poin jawaban yang diharapkan, untuk panduan penilaian manual"></textarea>
@@ -120,8 +127,8 @@
         <div class="btn-group btn-group-sm" role="group">
             <button type="button" class="btn btn-outline-dark filter-chip active" data-filter="semua">Semua</button>
             <button type="button" class="btn btn-outline-dark filter-chip" data-filter="pg">Pilihan Ganda</button>
-            <button type="button" class="btn btn-outline-dark filter-chip" data-filter="bs">Jawaban Singkat</button>
-            <button type="button" class="btn btn-outline-dark filter-chip" data-filter="ur">Uraian</button>
+            <button type="button" class="btn btn-outline-dark filter-chip" data-filter="tf">Benar / Salah</button>
+            <button type="button" class="btn btn-outline-dark filter-chip" data-filter="ur">Esai</button>
         </div>
     </div>
 
@@ -188,11 +195,11 @@ document.addEventListener('DOMContentLoaded', function(){
   const btnSubmitEl = document.getElementById('btnSubmit');
   const tipeAktifEl = document.getElementById('tipeAktif');
 
-  const LABEL_TIPE = { pg: 'Pilihan Ganda', bs: 'Jawaban Singkat', ur: 'Uraian' };
+  const LABEL_TIPE = { pg: 'Pilihan Ganda', tf: 'Benar / Salah', ur: 'Esai' };
   const HINT_TIPE = {
     pg: 'Tulis pertanyaan, isi opsi jawaban (minimal 2), lalu tandai satu opsi sebagai jawaban benar.',
-    bs: 'Tulis pertanyaan, lalu tulis jawaban singkat yang dianggap benar.',
-    ur: 'Tulis pertanyaan uraian. Kunci jawaban bersifat opsional sebagai panduan penilaian.'
+    tf: 'Tulis pernyataan, lalu pilih apakah kunci jawabannya Benar atau Salah.',
+    ur: 'Tulis pertanyaan esai. Kunci jawaban bersifat opsional sebagai panduan penilaian HRD (esai dinilai manual).'
   };
 
   function hurufOpsi(i){ return String.fromCharCode(65 + i); }
@@ -210,7 +217,7 @@ document.addEventListener('DOMContentLoaded', function(){
       b.classList.toggle('active', b.dataset.tipe === tipe);
     });
     document.getElementById('blokPG').classList.toggle('d-none', tipe !== 'pg');
-    document.getElementById('blokBS').classList.toggle('d-none', tipe !== 'bs');
+    document.getElementById('blokTF').classList.toggle('d-none', tipe !== 'tf');
     document.getElementById('blokUR').classList.toggle('d-none', tipe !== 'ur');
     formTitleEl.textContent = (editingId ? 'Edit Soal — ' : 'Tambah Soal — ') + LABEL_TIPE[tipe];
     formHintEl.textContent = HINT_TIPE[tipe];
@@ -220,7 +227,7 @@ document.addEventListener('DOMContentLoaded', function(){
   function sembunyikanError(){
     document.getElementById('errPertanyaan').classList.add('d-none');
     document.getElementById('errOpsi').classList.add('d-none');
-    document.getElementById('errBS').classList.add('d-none');
+    document.getElementById('errTF').classList.add('d-none');
   }
 
   function buatBarisOpsi(teks){
@@ -268,12 +275,15 @@ document.addEventListener('DOMContentLoaded', function(){
 
   document.getElementById('btnTambahOpsi').addEventListener('click', function(){ buatBarisOpsi(''); });
 
-  const jawabanSingkatEl = document.getElementById('jawabanSingkat');
-  jawabanSingkatEl.addEventListener('input', function(){
-    if(jawabanSingkatEl.value.trim() !== ''){
-      document.getElementById('errBS').classList.add('d-none');
-    }
+  document.querySelectorAll('input[name="jawabanTF"]').forEach(function(r){
+    r.addEventListener('change', function(){
+      document.getElementById('errTF').classList.add('d-none');
+    });
   });
+  function setJawabanTF(nilai){
+    document.getElementById('tfBenar').checked = (nilai === 'benar');
+    document.getElementById('tfSalah').checked = (nilai === 'salah');
+  }
 
   function resetForm(){
     daftarOpsiEl.innerHTML = '';
@@ -282,7 +292,7 @@ document.addEventListener('DOMContentLoaded', function(){
     document.getElementById('poin').value = 10;
     document.getElementById('kunciUraian').value = '';
     document.getElementById('editId').value = '';
-    jawabanSingkatEl.value = '';
+    setJawabanTF(null);
     editingId = null;
     btnSubmitEl.disabled = false;
     btnSubmitEl.innerHTML = '<i class="bi bi-check-lg"></i> Simpan Soal';
@@ -337,7 +347,7 @@ document.addEventListener('DOMContentLoaded', function(){
     const listSemua = cacheSoal;
     document.getElementById('statTotal').textContent = listSemua.length;
     document.getElementById('statPG').textContent = listSemua.filter(function(s){ return s.tipe === 'pg'; }).length;
-    document.getElementById('statBS').textContent = listSemua.filter(function(s){ return s.tipe === 'bs'; }).length;
+    document.getElementById('statTF').textContent = listSemua.filter(function(s){ return s.tipe === 'tf'; }).length;
     document.getElementById('statUR').textContent = listSemua.filter(function(s){ return s.tipe === 'ur'; }).length;
 
     const list = filterAktif === 'semua' ? listSemua : listSemua.filter(function(s){ return s.tipe === filterAktif; });
@@ -361,8 +371,8 @@ document.addEventListener('DOMContentLoaded', function(){
             hurufOpsi(i) + '. ' + escapeHtml(o) + (i === soal.jawabanIndex ? ' <i class="bi bi-check-circle-fill text-success"></i>' : '') + '</li>';
         });
         bodyHtml += '</ul>';
-      } else if(soal.tipe === 'bs'){
-        bodyHtml += '<div class="small text-muted border rounded p-2 mb-2"><strong>Jawaban benar:</strong> ' + escapeHtml(soal.jawabanSingkat) + '</div>';
+      } else if(soal.tipe === 'tf'){
+        bodyHtml += '<div class="small text-muted border rounded p-2 mb-2"><strong>Kunci jawaban:</strong> ' + (soal.jawabanTF === 'benar' ? 'Benar' : 'Salah') + '</div>';
       } else if(soal.tipe === 'ur' && soal.kunci){
         bodyHtml += '<div class="small text-muted border rounded p-2 mb-2"><strong>Kunci/rubrik:</strong> ' + escapeHtml(soal.kunci) + '</div>';
       }
@@ -416,8 +426,8 @@ document.addEventListener('DOMContentLoaded', function(){
         }
       });
       perbaruiHurufOpsi();
-    } else if(soal.tipe === 'bs'){
-      jawabanSingkatEl.value = soal.jawabanSingkat || '';
+    } else if(soal.tipe === 'tf'){
+      setJawabanTF(soal.jawabanTF);
     } else if(soal.tipe === 'ur'){
       document.getElementById('kunciUraian').value = soal.kunci || '';
     }
@@ -479,15 +489,15 @@ document.addEventListener('DOMContentLoaded', function(){
       }
       payload.opsi = opsi;
       payload.jawabanIndex = jawabanIndex;
-    } else if(tipe === 'bs'){
-      const jawabanSingkat = jawabanSingkatEl.value.trim();
-      if(jawabanSingkat === ''){
-        document.getElementById('errBS').classList.remove('d-none');
+    } else if(tipe === 'tf'){
+      const dipilih = document.querySelector('input[name="jawabanTF"]:checked');
+      if(!dipilih){
+        document.getElementById('errTF').classList.remove('d-none');
         valid = false;
       } else {
-        document.getElementById('errBS').classList.add('d-none');
+        document.getElementById('errTF').classList.add('d-none');
+        payload.jawabanTF = dipilih.value;
       }
-      payload.jawabanSingkat = jawabanSingkat;
     } else if(tipe === 'ur'){
       payload.kunci = document.getElementById('kunciUraian').value.trim();
     }

@@ -2,20 +2,27 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Controllers\Controller;
+use App\Exceptions\TokenException;
+use App\Http\Controllers\Concerns\MembuatPdfHasil;
 use App\Models\HasilUjian;
 use App\Models\JawabanPeserta;
 use App\Models\Ujian;
+use App\Models\UjianToken;
+use App\Services\PengerjaanService;
+use App\Services\PenilaianService;
+use App\Services\TokenService;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
+/**
+ * Pengerjaan ujian. Dipakai dua jenis peserta:
+ *  - karyawan aktif (guard "karyawan", route karyawan.ujian.*)
+ *  - karyawan baru lewat token tanpa akun (kepemilikan dicek lewat session, route peserta.ujian.*)
+ */
 class UjianSayaController extends Controller
 {
-    /**
-     * Poin mentah per tipe soal. Harus sama dengan PenilaianController::POIN_MENTAH.
-     */
-    protected const POIN_MENTAH = ['pg' => 5, 'bs' => 10, 'ur' => 20];
+    use MembuatPdfHasil;
 
     /**
      * Toleransi (detik) untuk simpanan jawaban yang tiba sedikit setelah batas waktu
@@ -23,8 +30,15 @@ class UjianSayaController extends Controller
      */
     protected const TOLERANSI_DETIK = 10;
 
+    public function __construct(
+        protected TokenService $tokens,
+        protected PengerjaanService $pengerjaan,
+        protected PenilaianService $penilaian,
+    ) {
+    }
+
     /* =========================================================
-     |  Daftar ujian untuk karyawan yang sedang login
+     |  Daftar ujian untuk karyawan aktif
      * =========================================================*/
 
     public function index()
@@ -38,7 +52,7 @@ class UjianSayaController extends Controller
             ->get()
             ->each(function (HasilUjian $h) {
                 if ($h->sisaDetik() <= 0) {
-                    $this->finalisasi($h);
+                    $this->penilaian->finalisasiPengerjaan($h);
                 }
             });
 
@@ -47,23 +61,16 @@ class UjianSayaController extends Controller
             ->where('status', 'berlangsung')
             ->get();
 
-        // Ujian yang tampil: perorangan (khusus karyawan ini) + karyawan baru (untuk semua),
-        // hanya selama masa berlaku, dan belum pernah dikerjakan.
-        $sekarang = now()->format('H:i:s');
-
+        // Ujian lanjutan milik karyawan ini yang masih aktif dan belum dikerjakan.
+        // Ujian tidak dibatasi jam: bisa diakses kapan saja selama status aktif (dan punya token).
         $tersedia = Ujian::query()
+            ->aktif()
             ->withCount('soal')
             ->has('soal')
-            ->where(function ($q) use ($karyawan) {
-                $q->where('jenis', 'karyawan_baru')
-                  ->orWhere(function ($qq) use ($karyawan) {
-                      $qq->where('jenis', 'perorangan')->where('karyawan_id', $karyawan->id);
-                  });
-            })
-            ->whereTime('jam_mulai', '<=', $sekarang)
-            ->whereTime('jam_selesai', '>', $sekarang)
+            ->where('jenis', 'perorangan')
+            ->where('karyawan_id', $karyawan->id)
             ->whereDoesntHave('hasilUjian', fn ($q) => $q->where('karyawan_id', $karyawan->id))
-            ->orderBy('jam_selesai')
+            ->latest()
             ->get();
 
         $riwayat = HasilUjian::with('ujian')
@@ -77,69 +84,65 @@ class UjianSayaController extends Controller
     }
 
     /* =========================================================
-     |  Mulai ujian
+     |  Masuk ujian lanjutan dengan token (terikat akun)
      * =========================================================*/
 
-    public function mulai(Ujian $ujian)
+    public function mulaiDenganToken(Request $request)
     {
+        $request->validate(['token' => ['required', 'string', 'max:32']], [
+            'token.required' => 'Kode token wajib diisi.',
+        ]);
+
         $karyawan = auth('karyawan')->user();
+        $token = $this->tokens->cari($request->input('token'));
 
-        $sudahAda = HasilUjian::where('ujian_id', $ujian->id)
-            ->where('karyawan_id', $karyawan->id)
-            ->first();
+        $gagal = fn (string $pesan) => back()->withErrors(['token' => $pesan])->withInput();
 
-        if ($sudahAda) {
-            return $sudahAda->status === 'berlangsung'
-                ? redirect()->route('karyawan.ujian.kerjakan', $sudahAda)
-                : redirect()->route('karyawan.ujian.index')->with('error', 'Kamu sudah mengerjakan ujian ini.');
+        if (! $token || $token->status !== UjianToken::STATUS_AKTIF) {
+            return $gagal('Token tidak valid atau sudah digunakan.');
         }
 
-        if (! $this->bolehDiikuti($ujian, $karyawan)) {
-            return redirect()->route('karyawan.ujian-index')
-                ->with('error', 'Ujian ini tidak tersedia untuk kamu pada waktu sekarang.');
+        // Token pengganti: lanjutkan pengerjaan yang terputus.
+        if ($token->tipe === UjianToken::TIPE_PENGGANTI) {
+            try {
+                $hasil = $this->pengerjaan->lanjutkan($token, $this->tokens, $this->penilaian, $karyawan->id);
+            } catch (TokenException $e) {
+                return $gagal($e->getMessage());
+            }
+
+            return redirect()->route('karyawan.ujian.kerjakan', $hasil);
         }
 
+        // Token ujian lanjutan terikat ke satu akun: tidak bisa dipindah tangankan.
+        if ($token->tipe !== UjianToken::TIPE_KARYAWAN || (int) $token->karyawan_id !== (int) $karyawan->id) {
+            return $gagal('Token ini tidak dapat digunakan pada akun kamu.');
+        }
+
+        $ujian = $token->ujian;
+
+        if (! $ujian->is_aktif) {
+            return $gagal('Ujian ini sedang tidak aktif.');
+        }
         if ($ujian->soal()->count() === 0) {
-            return redirect()->route('karyawan.ujian-index')->with('error', 'Ujian ini belum memiliki soal.');
+            return $gagal('Ujian ini belum memiliki soal.');
         }
 
         try {
-            $hasil = DB::transaction(function () use ($ujian, $karyawan) {
-                $hasil = HasilUjian::create([
-                    'ujian_id' => $ujian->id,
-                    'karyawan_id' => $karyawan->id,
-                    'status' => 'berlangsung',
-                    'waktu_mulai' => now(),
-                ]);
+            $hasil = DB::transaction(function () use ($ujian, $karyawan, $token) {
+                $hasil = $this->pengerjaan->mulai($ujian, $karyawan->id, null);
 
-                $daftarSoal = $ujian->soal()->orderBy('soals.id')->get();
-                if ($ujian->acak_soal) {
-                    $daftarSoal = $daftarSoal->shuffle();
-                }
-
-                foreach ($daftarSoal->values() as $i => $soal) {
-                    $urutanOpsi = null;
-                    if ($soal->tipe === 'pg') {
-                        $urutanOpsi = array_keys($soal->opsi ?? []);
-                        if ($ujian->acak_jawaban) {
-                            shuffle($urutanOpsi);
-                        }
-                    }
-
-                    JawabanPeserta::create([
-                        'hasil_ujian_id' => $hasil->id,
-                        'soal_id' => $soal->id,
-                        'tipe' => $soal->tipe,
-                        'urutan' => $i + 1,
-                        'urutan_opsi' => $urutanOpsi,
-                    ]);
+                // Atomik: kalau token keburu dipakai request lain, seluruh transaksi dibatalkan.
+                if (! $this->tokens->klaim($token, $hasil->id)) {
+                    throw new TokenException('Token tidak valid atau sudah digunakan.');
                 }
 
                 return $hasil;
             });
-        } catch (UniqueConstraintViolationException $e) {
-            // Klik ganda / dua tab: pengerjaan sudah terbuat oleh request lain.
-            return redirect()->route('karyawan.ujian.index');
+        } catch (TokenException $e) {
+            return $gagal($e->getMessage());
+        } catch (UniqueConstraintViolationException) {
+            // Sudah pernah mengerjakan ujian ini (satu kali per ujian).
+            return redirect()->route('karyawan.ujian.index')->with('error', 'Kamu sudah pernah mengerjakan ujian ini.');
         }
 
         return redirect()->route('karyawan.ujian.kerjakan', $hasil);
@@ -154,19 +157,20 @@ class UjianSayaController extends Controller
         $this->pastikanMilik($hasilUjian);
 
         if ($hasilUjian->status !== 'berlangsung') {
-            return redirect()->route('karyawan.ujian.hasil', $hasilUjian);
+            return redirect($this->rute('hasil', $hasilUjian));
         }
 
         if ($hasilUjian->sisaDetik() <= 0) {
-            $this->finalisasi($hasilUjian);
+            $this->penilaian->finalisasiPengerjaan($hasilUjian);
 
-            return redirect()->route('karyawan.ujian.hasil', $hasilUjian)
+            return redirect($this->rute('hasil', $hasilUjian))
                 ->with('info', 'Waktu pengerjaan sudah habis, jawabanmu otomatis dikumpulkan.');
         }
 
         $hasilUjian->load([
             'ujian',
             'karyawan',
+            'pesertaBaru',
             'jawaban' => fn ($q) => $q->orderBy('urutan'),
             'jawaban.soal',
         ]);
@@ -195,6 +199,8 @@ class UjianSayaController extends Controller
             'hasilUjian' => $hasilUjian,
             'soal' => $soal,
             'sisaDetik' => max(0, $hasilUjian->sisaDetik()),
+            'urlJawab' => $this->rute('jawab', $hasilUjian),
+            'urlSelesai' => $this->rute('selesai', $hasilUjian),
         ]);
     }
 
@@ -207,12 +213,12 @@ class UjianSayaController extends Controller
 
         if ($hasilUjian->status !== 'berlangsung' || $hasilUjian->sisaDetik() + self::TOLERANSI_DETIK <= 0) {
             if ($hasilUjian->status === 'berlangsung') {
-                $this->finalisasi($hasilUjian);
+                $this->penilaian->finalisasiPengerjaan($hasilUjian);
             }
 
             return response()->json([
                 'selesai' => true,
-                'redirect' => route('karyawan.ujian.hasil', $hasilUjian),
+                'redirect' => $this->rute('hasil', $hasilUjian),
             ], 409);
         }
 
@@ -232,6 +238,15 @@ class UjianSayaController extends Controller
             }
 
             $jawaban->update(['jawaban_index' => $index]);
+        } elseif ($jawaban->tipe === 'tf') {
+            // 1 = Benar, 0 = Salah
+            $index = isset($data['jawaban_index']) ? (int) $data['jawaban_index'] : null;
+
+            if ($index !== null && ! in_array($index, [0, 1], true)) {
+                return response()->json(['message' => 'Jawaban tidak valid.'], 422);
+            }
+
+            $jawaban->update(['jawaban_index' => $index]);
         } else {
             $teks = trim($data['jawaban_teks'] ?? '');
             $jawaban->update(['jawaban_teks' => $teks === '' ? null : $teks]);
@@ -245,10 +260,10 @@ class UjianSayaController extends Controller
         $this->pastikanMilik($hasilUjian);
 
         if ($hasilUjian->status === 'berlangsung') {
-            $this->finalisasi($hasilUjian);
+            $this->penilaian->finalisasiPengerjaan($hasilUjian);
         }
 
-        return redirect()->route('karyawan.ujian.hasil', $hasilUjian);
+        return redirect($this->rute('hasil', $hasilUjian));
     }
 
     public function hasil(HasilUjian $hasilUjian)
@@ -256,10 +271,10 @@ class UjianSayaController extends Controller
         $this->pastikanMilik($hasilUjian);
 
         if ($hasilUjian->status === 'berlangsung') {
-            return redirect()->route('karyawan.ujian.kerjakan', $hasilUjian);
+            return redirect($this->rute('kerjakan', $hasilUjian));
         }
 
-        $hasilUjian->load('ujian');
+        $hasilUjian->load('ujian', 'pesertaBaru');
 
         $totalSoal = $hasilUjian->jawaban()->count();
         $terjawab = $hasilUjian->jawaban()
@@ -268,91 +283,62 @@ class UjianSayaController extends Controller
             })
             ->count();
 
-        return view('karyawan.ujian-hasil', compact('hasilUjian', 'totalSoal', 'terjawab'));
+        // Skor langsung (PG + Benar/Salah). Bersifat sementara selama masih ada esai yang belum dinilai.
+        $auto = $hasilUjian->jawaban()->whereIn('tipe', PenilaianService::TIPE_OTOMATIS);
+        $jumlahAuto = (clone $auto)->count();
+        $jumlahBenar = (clone $auto)->where('benar', true)->count();
+        $jumlahEsai = $hasilUjian->jawaban()->whereIn('tipe', PenilaianService::TIPE_MANUAL)->count();
+
+        return view('karyawan.ujian-hasil', [
+            'hasilUjian' => $hasilUjian,
+            'totalSoal' => $totalSoal,
+            'terjawab' => $terjawab,
+            'jumlahAuto' => $jumlahAuto,
+            'jumlahBenar' => $jumlahBenar,
+            'jumlahEsai' => $jumlahEsai,
+            'pesertaBaru' => $hasilUjian->peserta_baru_id !== null,
+            'urlPdf' => $this->rute('pdf', $hasilUjian),
+            'urlKembali' => $hasilUjian->peserta_baru_id !== null ? route('welcome') : route('karyawan.ujian.index'),
+        ]);
+    }
+
+    /** Cetak / unduh hasil ujian (ringkasan, tanpa kunci jawaban). */
+    public function pdf(HasilUjian $hasilUjian)
+    {
+        $this->pastikanMilik($hasilUjian);
+
+        abort_if($hasilUjian->status === 'berlangsung', 404);
+
+        return $this->responsPdf($hasilUjian, detail: false);
     }
 
     /* =========================================================
      |  Helper
      * =========================================================*/
 
+    /** Karyawan aktif: harus pemilik hasil. Peserta baru: id hasil harus tercatat di session browser ini. */
     protected function pastikanMilik(HasilUjian $hasilUjian): void
     {
-        abort_unless((int) $hasilUjian->karyawan_id === (int) auth('karyawan')->id(), 403);
+        if (auth('karyawan')->check()) {
+            abort_unless((int) $hasilUjian->karyawan_id === (int) auth('karyawan')->id(), 403);
+
+            return;
+        }
+
+        abort_unless(
+            $hasilUjian->peserta_baru_id !== null
+                && in_array($hasilUjian->id, session('peserta.hasil_ids', []), true),
+            403
+        );
     }
 
-    /**
-     * Ujian boleh diikuti kalau: ditujukan untuk karyawan ini (atau untuk semua),
-     * dan jam sekarang berada di dalam masa berlaku (jam mulai <= sekarang < jam selesai).
-     */
-    protected function bolehDiikuti(Ujian $ujian, $karyawan): bool
+    protected function prefixRute(): string
     {
-        $untukKaryawanIni = $ujian->jenis === 'karyawan_baru'
-            || (int) $ujian->karyawan_id === (int) $karyawan->id;
-
-        $sekarang = now()->format('H:i:s');
-
-        return $untukKaryawanIni
-            && $sekarang >= $ujian->jam_mulai
-            && $sekarang < $ujian->jam_selesai;
+        return auth('karyawan')->check() ? 'karyawan.ujian' : 'peserta.ujian';
     }
 
-    /**
-     * Kumpulkan pengerjaan: nilai otomatis untuk PG, soal manual dibiarkan menunggu
-     * penilaian admin. Kalau tidak ada jawaban yang perlu dinilai manual, nilai
-     * langsung dihitung dan status menjadi selesai_dinilai.
-     */
-    protected function finalisasi(HasilUjian $hasilUjian): void
+    protected function rute(string $nama, HasilUjian $hasilUjian): string
     {
-        DB::transaction(function () use ($hasilUjian) {
-            // Kunci baris supaya finalisasi tidak jalan dua kali bersamaan.
-            $hasil = HasilUjian::with(['ujian', 'jawaban.soal'])
-                ->lockForUpdate()
-                ->find($hasilUjian->id);
-
-            if (! $hasil || $hasil->status !== 'berlangsung') {
-                return;
-            }
-
-            $mentahPG = 0;
-            $adaYangPerluDinilai = false;
-
-            foreach ($hasil->jawaban as $j) {
-                if ($j->tipe === 'pg') {
-                    $benar = $j->jawaban_index !== null
-                        && $j->soal
-                        && $j->jawaban_index === $j->soal->jawaban_index;
-                    $skor = $benar ? self::POIN_MENTAH['pg'] : 0;
-                    $mentahPG += $skor;
-
-                    $j->update(['benar' => $benar, 'skor' => $skor]);
-                } elseif (blank($j->jawaban_teks)) {
-                    // Soal manual yang tidak dijawab: langsung 0, tidak perlu dinilai penilai.
-                    $j->update(['skor' => 0]);
-                } else {
-                    $adaYangPerluDinilai = true;
-                }
-            }
-
-            $update = [
-                'waktu_selesai' => now()->min($hasil->batasWaktu()),
-            ];
-
-            if ($adaYangPerluDinilai) {
-                $update['status'] = 'belum_dinilai';
-            } else {
-                $maksimalMentah = $hasil->jawaban->sum(fn ($j) => self::POIN_MENTAH[$j->tipe] ?? 0);
-                $nilaiPG = $maksimalMentah > 0 ? round(($mentahPG / $maksimalMentah) * 100, 2) : 0;
-
-                $update += [
-                    'status' => 'selesai_dinilai',
-                    'nilai_pilihan_ganda' => $nilaiPG,
-                    'nilai_manual' => 0,
-                    'nilai_total' => $nilaiPG,
-                    'dinilai_pada' => now(),
-                ];
-            }
-
-            $hasil->update($update);
-        });
+        return route($this->prefixRute() . '.' . $nama, $hasilUjian);
     }
 }
